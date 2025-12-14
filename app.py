@@ -1,158 +1,152 @@
-# =========================================================
-# STREAMLIT APP
-# CLUSTERING PER TRANSAKSI + REGRESI ENSEMBLE
-# =========================================================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, silhouette_score
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
 
-# ---------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------
-st.set_page_config(page_title="Analisis Toko Bangunan", layout="wide")
-st.title("📊 Clustering & Regresi Ensemble")
-st.write("Analisis transaksi penjualan toko bangunan berbasis data")
+st.set_page_config(page_title="Clustering & Regresi Toko Bangunan", layout="wide")
 
-# ---------------------------------------------------------
+st.title("📊 Analisis Clustering & Regresi Toko Bangunan")
+st.markdown("Segmentasi pelanggan & prediksi total harga menggunakan **Ensemble Learning**")
+
+# =========================
 # LOAD DATA
-# ---------------------------------------------------------
-@st.cache_data
-def load_data():
-    return pd.read_csv("TRANSAKSI_PENJUALAN_PRODUK_TOKO_BANGUNAN_SYNTHETIC.csv")
+# =========================
+st.sidebar.header("📂 Dataset")
 
-df = load_data()
+uploaded_file = st.sidebar.file_uploader(
+    "Upload file CSV",
+    type=["csv"]
+)
 
-st.subheader("📁 Dataset Awal")
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+else:
+    df = pd.read_csv("TRANSAKSI_PENJUALAN_PRODUK_TOKO_BANGUNAN_SYNTHETIC.csv")
+
+st.subheader("🔍 Data Awal")
 st.dataframe(df.head())
+st.write("Jumlah data:", df.shape)
 
-# =========================================================
-# CLUSTERING PER TRANSAKSI
-# =========================================================
-st.header("🔹 Clustering Transaksi (Per Transaksi)")
+# =========================
+# CLUSTERING
+# =========================
+st.header("🟢 Clustering Pelanggan (K-Means)")
 
-# 1. Ubah data per barang → per transaksi
-df_cluster = df.groupby("ID Transaksi").agg({
-    "Total Harga": "sum",
-    "Kuantitas": "sum"
+df_cluster = df.groupby('ID Transaksi').agg({
+    'Total Harga': 'sum',
+    'Kuantitas': 'sum'
 }).reset_index()
 
-st.subheader("📊 Eksplorasi Data Transaksi")
+st.subheader("📈 Statistik Transaksi")
 st.write(df_cluster.describe())
 
-# 2. Normalisasi
 scaler = StandardScaler()
-data_scaled = scaler.fit_transform(df_cluster[["Total Harga", "Kuantitas"]])
+data_scaled = scaler.fit_transform(df_cluster[['Total Harga', 'Kuantitas']])
 
-# 3. KMeans
 kmeans = KMeans(n_clusters=3, random_state=42)
-df_cluster["Cluster"] = kmeans.fit_predict(data_scaled)
+df_cluster['Cluster'] = kmeans.fit_predict(data_scaled)
 
-st.subheader("📌 Jumlah Transaksi per Cluster")
-st.write(df_cluster["Cluster"].value_counts())
+st.subheader("👥 Jumlah Transaksi per Cluster")
+st.write(df_cluster['Cluster'].value_counts())
 
-# 4. Visualisasi clustering
-fig1, ax1 = plt.subplots(figsize=(6,4))
-ax1.scatter(
-    df_cluster["Total Harga"],
-    df_cluster["Kuantitas"],
-    c=df_cluster["Cluster"],
-    alpha=0.7
+# Visualisasi cluster
+fig1, ax1 = plt.subplots(figsize=(8,5))
+sns.scatterplot(
+    data=df_cluster,
+    x='Total Harga',
+    y='Kuantitas',
+    hue='Cluster',
+    palette='viridis',
+    s=100,
+    ax=ax1
 )
-ax1.set_xlabel("Total Belanja (Rupiah)")
-ax1.set_ylabel("Jumlah Barang")
-ax1.set_title("Segmentasi Transaksi Toko Bangunan")
+ax1.set_title("Segmentasi Pelanggan")
+ax1.grid(True, linestyle='--', alpha=0.5)
 st.pyplot(fig1)
 
-# 5. Interpretasi cluster
-st.subheader("📈 Profil Rata-rata Setiap Cluster")
-cluster_mean = df_cluster.groupby("Cluster")[["Total Harga", "Kuantitas"]].mean()
-st.write(cluster_mean.round(0))
+# Interpretasi
+st.subheader("📌 Profil Cluster")
+cluster_mean = df_cluster.groupby('Cluster')[['Total Harga', 'Kuantitas']].mean()
+st.dataframe(cluster_mean.round(0))
 
-# 6. Evaluasi clustering
-score = silhouette_score(data_scaled, df_cluster["Cluster"])
-st.write(f"**Silhouette Score:** {score:.4f}")
-st.caption("Semakin mendekati 1, semakin baik pemisahan cluster")
+sil_score = silhouette_score(data_scaled, df_cluster['Cluster'])
+st.success(f"Silhouette Score: {sil_score:.4f}")
 
-# =========================================================
-# REGRESI ENSEMBLE
-# =========================================================
-st.header("🔹 Regresi Ensemble (Prediksi Total Harga)")
+# =========================
+# REGRESI
+# =========================
+st.header("🔵 Regresi Ensemble (Prediksi Total Harga)")
 
 df_reg = df.copy()
 
-# Encode data kategorikal
 cat_cols = ["Produk", "Kategori", "Satuan"]
 encoder = LabelEncoder()
 for col in cat_cols:
     df_reg[col] = encoder.fit_transform(df_reg[col])
 
-# Drop kolom tidak relevan
 df_reg = df_reg.drop(columns=["ID Transaksi", "Tanggal Pembelian"])
 
 X = df_reg.drop(columns=["Total Harga"])
 y = df_reg["Total Harga"]
 
-# Split data
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42
 )
 
-# Scaling
 scaler_reg = StandardScaler()
 X_train = scaler_reg.fit_transform(X_train)
-X_test  = scaler_reg.transform(X_test)
+X_test = scaler_reg.transform(X_test)
 
-# Model ensemble
-rf  = RandomForestRegressor(n_estimators=200, random_state=42)
-gbr = GradientBoostingRegressor(n_estimators=200, random_state=42)
+rf = RandomForestRegressor(
+    n_estimators=200,
+    random_state=42
+)
 
-ensemble = VotingRegressor([
-    ("RandomForest", rf),
-    ("GradientBoosting", gbr)
-])
+gbr = GradientBoostingRegressor(
+    n_estimators=200,
+    learning_rate=0.1,
+    random_state=42
+)
 
-# Training
-ensemble.fit(X_train, y_train)
+ensemble_model = VotingRegressor(
+    estimators=[
+        ("RandomForest", rf),
+        ("GradientBoosting", gbr)
+    ]
+)
 
-# Prediksi
-y_pred = ensemble.predict(X_test)
+ensemble_model.fit(X_train, y_train)
+y_pred = ensemble_model.predict(X_test)
 
-# ---------------------------------------------------------
-# Evaluasi Regresi
-# ---------------------------------------------------------
-mae  = mean_absolute_error(y_test, y_pred)
-mse  = mean_squared_error(y_test, y_pred)
-rmse = np.sqrt(mse)
-r2   = r2_score(y_test, y_pred)
+# Evaluasi
+mae = mean_absolute_error(y_test, y_pred)
+rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+r2 = r2_score(y_test, y_pred)
 
-st.subheader("📈 Hasil Evaluasi Regresi")
-st.write(f"**MAE**  : {mae:.2f}")
-st.write(f"**MSE**  : {mse:.2f}")
-st.write(f"**RMSE** : {rmse:.2f}")
-st.write(f"**R²**   : {r2:.4f}")
+st.subheader("📊 Hasil Evaluasi")
+col1, col2, col3 = st.columns(3)
+col1.metric("MAE", f"{mae:,.0f}")
+col2.metric("RMSE", f"{rmse:,.0f}")
+col3.metric("R²", f"{r2:.4f}")
 
-# ---------------------------------------------------------
-# Visualisasi Regresi
-# ---------------------------------------------------------
-fig2, ax2 = plt.subplots(figsize=(6,4))
+# Visualisasi regresi
+fig2, ax2 = plt.subplots(figsize=(6,5))
 ax2.scatter(y_test, y_pred, alpha=0.6)
 ax2.plot(
     [y_test.min(), y_test.max()],
     [y_test.min(), y_test.max()],
     linestyle="--"
 )
-ax2.set_xlabel("Nilai Aktual (Total Harga)")
+ax2.set_xlabel("Nilai Aktual")
 ax2.set_ylabel("Nilai Prediksi")
-ax2.set_title("Aktual vs Prediksi (Regresi Ensemble)")
+ax2.set_title("Aktual vs Prediksi")
 st.pyplot(fig2)
 
-st.success("✅ Analisis clustering dan regresi ensemble berhasil dijalankan.")
+st.success("✅ Analisis Clustering & Regresi berhasil dijalankan")
